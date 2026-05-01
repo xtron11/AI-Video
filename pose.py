@@ -46,7 +46,7 @@ count_natural = 0           # кадры с естественной жести�
 count_excessive = 0         # кадры с избыточной жестикуляцией
 last_active_time = 0        # когда последний раз видели активное движение рук
 
-cap = cv2.VideoCapture("Video/01_1.mp4")
+cap = cv2.VideoCapture("Video/video3.mp4")
 
 with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
     while cap.isOpened():

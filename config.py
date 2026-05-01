@@ -1,4 +1,4 @@
-VIDEO_PATH = "Video/video4.mp4"
+VIDEO_PATH = "Video/video3.mp4"
 
 # Пороги для анализаторов
 CROSS_THRESHOLD_RATIO = 0.6      # доля ширины плеч для детектора скрещивания
@@ -11,3 +11,4 @@ GESTURE_WINDOW = 2.0             # секунд
 GESTURE_STIFF_MAX = 30
 GESTURE_EXCESSIVE_MIN = 100
 GESTURE_REST_GRACE = 4.0         # льготный период в секундах
+

@@ -20,11 +20,19 @@ cap = cv2.VideoCapture(VIDEO_PATH)
 with mp_holistic.Holistic(min_detection_confidence=0.5,
                           min_tracking_confidence=0.5,
                           refine_face_landmarks=True) as holistic:
+    
+    frame_idx = 0
+    current_time = 0.0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
 
     while cap.isOpened():
         ok, frame = cap.read()
         if not ok:
             break
+        
+        # Считаем кадры вместо того чтобы брать реальное время
+        frame_idx += 1
+        current_time = frame_idx / fps
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, _ = frame.shape
@@ -37,7 +45,7 @@ with mp_holistic.Holistic(min_detection_confidence=0.5,
             r_sh = np.array([lm[12].x * w, lm[12].y * h])
             sw   = np.linalg.norm(l_sh - r_sh) or 1
 
-            pose.update(lm, sw)
+            pose.update(lm, sw, current_time)
 
             # ── Жестикуляция ──
             if pose_results.left_hand_landmarks:
@@ -54,7 +62,7 @@ with mp_holistic.Holistic(min_detection_confidence=0.5,
             else:
                 r_rel = None
 
-            gesture_status, amp = gesture.update(l_rel, r_rel)
+            amp = gesture.update(current_time, l_rel, r_rel)
 
             # ── Тревога (касания лица) ──
             nose = np.array([lm[0].x * w, lm[0].y * h])
@@ -62,12 +70,27 @@ with mp_holistic.Holistic(min_detection_confidence=0.5,
                      if pose_results.left_hand_landmarks else 9999
             dist_r = np.linalg.norm(nose - np.array([r_finger.x * w, r_finger.y * h])) \
                      if pose_results.right_hand_landmarks else 9999
-            anxiety.update(dist_l, dist_r, sw)
+            anxiety.update(dist_l, dist_r, sw, current_time)
+            
+            total_crossed_time = pose.get_total_crossed(current_time)
+            is_hands_crossed = pose.is_crossed
+
+            # Выбираем цвет: красный если руки сейчас скрещены, белый если нет
+            crossed_color = (0, 0, 255) if is_hands_crossed else (255, 255, 255)
+
+            # Отрисовка на экране (снизу слева или под BPM)
+            cv2.putText(frame, f"Hands Crossed: {int(total_crossed_time)}s", (30, 140), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, crossed_color, 2)
+
+            # Если руки скрещены прямо сейчас, выведем уведомление
+            if is_hands_crossed:
+                cv2.putText(frame, "CLOSED POSE", (30, 170), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         # ── FaceMesh (взгляд) ──
         if pose_results.face_landmarks:
             # Получаем данные из анализатора
-            looking, current_bpm, focus_status, stiff_time = gaze.update(pose_results.face_landmarks.landmark)
+            looking, current_bpm, focus_status, stiff_time = gaze.update(pose_results.face_landmarks.landmark, current_time)
 
             # Цвета для индикации
             # Фокус — синий, Тревога — красный, Норма — зеленый
@@ -98,11 +121,10 @@ with mp_holistic.Holistic(min_detection_confidence=0.5,
                 cv2.putText(frame, "STIFF / FOCUS", (40, 152), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-
         cv2.imshow("Interview Analyzer", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
 cap.release()
 cv2.destroyAllWindows()
-print_report(gaze, gesture, anxiety, pose)
+print_report(gaze, gesture, anxiety, pose, current_time)
