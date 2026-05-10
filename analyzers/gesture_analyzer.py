@@ -1,17 +1,19 @@
 import numpy as np
 from config import (GESTURE_WINDOW, GESTURE_STIFF_MAX,
-                    GESTURE_EXCESSIVE_MIN, GESTURE_REST_GRACE)
+                    GESTURE_EXCESSIVE_FALLBACK, GESTURE_REST_GRACE)
 
 class GestureAnalyzer:
     def __init__(self):
         self.wrist_history = []
+        self.amp_history = []  # история всех амплитуд за интервью
+
         self.total_frames = 0
         self.count_stiff = 0
         self.count_natural = 0
         self.count_excessive = 0
         self.last_active_time = 0
 
-    def update(self, current_time=0, l_rel=None, r_rel=None):
+    def update(self, current_time=0, l_rel=None, r_rel=None, STEP=2):
         """
         l_rel, r_rel — кортежи (x, y) позиции пальца относительно плеча.
         """
@@ -39,30 +41,32 @@ class GestureAnalyzer:
                         np.std([p['y'] for p in r_data]))
 
         if amps:
-            self.total_frames += 1
+            self.total_frames += STEP
             avg_amp = sum(amps) / len(amps)
+            self.amp_history.append(avg_amp)
 
             if avg_amp >= GESTURE_STIFF_MAX:
                 self.last_active_time = current_time
 
-            if avg_amp > GESTURE_EXCESSIVE_MIN:
-                self.count_excessive += 1
-            elif avg_amp >= GESTURE_STIFF_MAX:
-                self.count_natural += 1
+            # Динамический порог excessive — выброс для этого конкретного человека
+            if len(self.amp_history) > 60:
+                mean = np.mean(self.amp_history)
+                std  = np.std(self.amp_history)
+                dynamic_excessive = mean + 2 * std
             else:
-                # Льготный период после активного жеста
+                dynamic_excessive = GESTURE_EXCESSIVE_FALLBACK   # fallback первые 2 секунды
+
+            if avg_amp > dynamic_excessive:
+                self.count_excessive += STEP
+            elif avg_amp >= GESTURE_STIFF_MAX:
+                self.count_natural += STEP
+            else:
                 if current_time - self.last_active_time < GESTURE_REST_GRACE:
-                    self.count_natural += 1
+                    self.count_natural += STEP
                 else:
-                    self.count_stiff += 1
-                    
-            return avg_amp # Возвращаем только число для логов/экрана
-        else:
-            # Руки не видны
-            if current_time - self.last_active_time > GESTURE_REST_GRACE:
-                self.total_frames += 1
-                self.count_stiff += 1
-            return 0
+                    self.count_stiff += STEP
+
+            return avg_amp
 
     def get_percentages(self):
         if self.total_frames == 0:

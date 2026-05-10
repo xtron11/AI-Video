@@ -8,7 +8,8 @@ ANXIETY_WINDOW = 30              # секунд
 ANXIETY_PATTERN_COUNT = 3
 
 GESTURE_WINDOW = 2.0             # секунд
-GESTURE_STIFF_MAX = 30
-GESTURE_EXCESSIVE_MIN = 100
+GESTURE_STIFF_MAX = 0.03
+GESTURE_EXCESSIVE_FALLBACK = 0.25
 GESTURE_REST_GRACE = 4.0         # льготный период в секундах
 
+STEP = 2  # Берем каждый второй кадр

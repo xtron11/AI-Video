@@ -43,8 +43,8 @@ class GazeAnalyzer:
         r_ear = eye_aspect_ratio(self._get_point(lm, 362), self._get_point(lm, 385), self._get_point(lm, 387), self._get_point(lm, 263), self._get_point(lm, 373), self._get_point(lm, 380))
         return (l_ear + r_ear) / 2.0
 
-    def update(self, lm, current_v_time):
-        self.total_frames += 1 # Для итогового отчета
+    def update(self, lm, current_v_time, STEP):
+        self.total_frames += STEP # Для итогового отчета
         
         # 1. Анализ взгляда
         head_ok = abs((self._get_point(lm, 1) - (self._get_point(lm, 33) + self._get_point(lm, 263)) / 2)[0]) < 0.05
@@ -52,7 +52,7 @@ class GazeAnalyzer:
         r_ratio = (lm[473].x - lm[362].x) / (lm[263].x - lm[362].x)
         looking = head_ok and (0.4 < l_ratio < 0.6 and 0.4 < r_ratio < 0.6)
         if looking:
-            self.look_count += 1
+            self.look_count += STEP
 
         # 2. Калибровка (используем время)
         ear = self.calculate_ear(lm)
@@ -133,7 +133,7 @@ class GazeAnalyzer:
             self.stiff_episodes.append((self.last_blink_time, current_time))
 
         pct = (self.look_count / self.total_frames) * 100
-        report = [f"Взгляд: {'Уверенный' if pct > 70 else 'Неуверенный'} ({pct:.1f}% времени)"]
+        report = [f"Взгляд: {'Уверенный' if pct > 60 else 'Неуверенный'} ({pct:.1f}% времени)"]
 
         if self.anomalies:
             report.append("\nУчастки тревожности (высокий BPM):")

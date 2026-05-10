@@ -1,7 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-from config import VIDEO_PATH
+from config import VIDEO_PATH, STEP
 from analyzers.gaze_analyzer import GazeAnalyzer
 from analyzers.pose_analyzer import PoseAnalyzer
 from analyzers.gesture_analyzer import GestureAnalyzer
@@ -21,6 +21,9 @@ with mp_holistic.Holistic(min_detection_confidence=0.5,
                           min_tracking_confidence=0.5,
                           refine_face_landmarks=True) as holistic:
     
+    # Определяем целевую высоту
+    target_height = 480
+
     frame_idx = 0
     current_time = 0.0
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
@@ -34,94 +37,102 @@ with mp_holistic.Holistic(min_detection_confidence=0.5,
         frame_idx += 1
         current_time = frame_idx / fps
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, _ = frame.shape
+        # 1. Сначала делаем Resize (уменьшаем нагрузку на память сразу)
+        h, w = frame.shape[:2]
+        ratio = target_height / h
+        small_frame = cv2.resize(frame, (int(w * ratio), target_height))
 
-        pose_results = holistic.process(rgb)
+        # 2. Теперь берём h, w уже от маленького кадра
+        h, w = small_frame.shape[:2]
 
-        if pose_results.pose_landmarks:
-            lm = pose_results.pose_landmarks.landmark
-            l_sh = np.array([lm[11].x * w, lm[11].y * h])
-            r_sh = np.array([lm[12].x * w, lm[12].y * h])
-            sw   = np.linalg.norm(l_sh - r_sh) or 1
+        if frame_idx % STEP == 0:
+            rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+            pose_results = holistic.process(rgb)
 
-            pose.update(lm, sw, current_time)
+            if pose_results.pose_landmarks:
+                lm = pose_results.pose_landmarks.landmark
+                l_sh = np.array([lm[11].x * w, lm[11].y * h])
+                r_sh = np.array([lm[12].x * w, lm[12].y * h])
+                sw   = np.linalg.norm(l_sh - r_sh) or 1
 
-            # ── Жестикуляция ──
-            if pose_results.left_hand_landmarks:
-                l_finger = pose_results.left_hand_landmarks.landmark[20]
-                l_rel = (l_finger.x * w - l_sh[0],
-                         l_finger.y * h - l_sh[1])
-            else:
-                l_rel = None
+                pose.update(lm, sw, current_time)
+                
+                # Жестикуляция
+                # Вместо пикселей — нормализованные координаты
+                if pose_results.left_hand_landmarks:
+                    l_finger = pose_results.left_hand_landmarks.landmark[20]
+                    l_rel = (l_finger.x - lm[11].x,   # относительно плеча в координатах 0-1
+                            l_finger.y - lm[11].y)
+                else:
+                    l_rel = None
 
-            if pose_results.right_hand_landmarks:
-                r_finger = pose_results.right_hand_landmarks.landmark[20]
-                r_rel = (r_finger.x * w - r_sh[0],
-                         r_finger.y * h - r_sh[1])
-            else:
-                r_rel = None
+                if pose_results.right_hand_landmarks:
+                    r_finger = pose_results.right_hand_landmarks.landmark[20]
+                    r_rel = (r_finger.x - lm[12].x,
+                            r_finger.y - lm[12].y)
+                else:
+                    r_rel = None
 
-            amp = gesture.update(current_time, l_rel, r_rel)
+                amp = gesture.update(current_time, l_rel, r_rel, STEP)
 
-            # ── Тревога (касания лица) ──
-            nose = np.array([lm[0].x * w, lm[0].y * h])
-            dist_l = np.linalg.norm(nose - np.array([l_finger.x * w, l_finger.y * h])) \
-                     if pose_results.left_hand_landmarks else 9999
-            dist_r = np.linalg.norm(nose - np.array([r_finger.x * w, r_finger.y * h])) \
-                     if pose_results.right_hand_landmarks else 9999
-            anxiety.update(dist_l, dist_r, sw, current_time)
-            
-            total_crossed_time = pose.get_total_crossed(current_time)
-            is_hands_crossed = pose.is_crossed
+                # ── Тревога (касания лица) ──
+                nose = np.array([lm[0].x * w, lm[0].y * h])
+                dist_l = np.linalg.norm(nose - np.array([l_finger.x * w, l_finger.y * h])) \
+                        if pose_results.left_hand_landmarks else 9999
+                dist_r = np.linalg.norm(nose - np.array([r_finger.x * w, r_finger.y * h])) \
+                        if pose_results.right_hand_landmarks else 9999
+                anxiety.update(dist_l, dist_r, sw, current_time)
+                
+                total_crossed_time = pose.get_total_crossed(current_time)
+                is_hands_crossed = pose.is_crossed
 
-            # Выбираем цвет: красный если руки сейчас скрещены, белый если нет
-            crossed_color = (0, 0, 255) if is_hands_crossed else (255, 255, 255)
+                # Выбираем цвет: красный если руки сейчас скрещены, белый если нет
+                crossed_color = (0, 0, 255) if is_hands_crossed else (255, 255, 255)
 
-            # Отрисовка на экране (снизу слева или под BPM)
-            cv2.putText(frame, f"Hands Crossed: {int(total_crossed_time)}s", (30, 140), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, crossed_color, 2)
+                # Отрисовка на экране (снизу слева или под BPM)
+                cv2.putText(small_frame, f"Hands Crossed: {int(total_crossed_time)}s", (30, 140), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, crossed_color, 2)
 
-            # Если руки скрещены прямо сейчас, выведем уведомление
-            if is_hands_crossed:
-                cv2.putText(frame, "CLOSED POSE", (30, 170), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                # Если руки скрещены прямо сейчас, выведем уведомление
+                if is_hands_crossed:
+                    cv2.putText(small_frame, "CLOSED POSE", (30, 170), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        # ── FaceMesh (взгляд) ──
-        if pose_results.face_landmarks:
-            # Получаем данные из анализатора
-            looking, current_bpm, focus_status, stiff_time = gaze.update(pose_results.face_landmarks.landmark, current_time)
+            # ── FaceMesh (взгляд) ──
+            if pose_results.face_landmarks:
+                # Получаем данные из анализатора
+                looking, current_bpm, focus_status, stiff_time = gaze.update(pose_results.face_landmarks.landmark, current_time, STEP)
 
-            # Цвета для индикации
-            # Фокус — синий, Тревога — красный, Норма — зеленый
-            color = (0, 255, 0)
-            if focus_status == "Deep Focus":
-                color = (255, 191, 0) # Голубой
-            elif current_bpm > gaze.BPM_THRESHOLD:
-                color = (0, 0, 255) # Красный
+                # Цвета для индикации
+                # Фокус — синий, Тревога — красный, Норма — зеленый
+                color = (0, 255, 0)
+                if focus_status == "Deep Focus":
+                    color = (255, 191, 0) # Голубой
+                elif current_bpm > gaze.BPM_THRESHOLD:
+                    color = (0, 0, 255) # Красный
 
-            # --- Отрисовка на экране ---
-            
-            # 1. Основной статус (Looking / Not Looking)
-            look_text = "LOOKING" if looking else "NOT LOOKING"
-            cv2.putText(frame, look_text, (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                # --- Отрисовка на экране ---
+                
+                # 1. Основной статус (Looking / Not Looking)
+                look_text = "LOOKING" if looking else "NOT LOOKING"
+                cv2.putText(small_frame, look_text, (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
-            # 2. Текущий BPM
-            cv2.putText(frame, f"BPM: {int(current_bpm)}", (30, 80), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                # 2. Текущий BPM
+                cv2.putText(small_frame, f"BPM: {int(current_bpm)}", (30, 80), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            # 3. Таймер без морганий (чтобы ты видел, как тикают те самые 10 секунд)
-            stiff_color = (255, 255, 0) if stiff_time > gaze.STIFF_THRESHOLD else (0, 200, 200)
-            cv2.putText(frame, f"No Blink: {stiff_time:.1f}s", (30, 110), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, stiff_color, 2)
+                # 3. Таймер без морганий (чтобы ты видел, как тикают те самые 10 секунд)
+                stiff_color = (255, 255, 0) if stiff_time > gaze.STIFF_THRESHOLD else (0, 200, 200)
+                cv2.putText(small_frame, f"No Blink: {stiff_time:.1f}s", (30, 110), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, stiff_color, 2)
 
-            # 4. Плашка статуса (появляется только при аномалиях)
-            if focus_status == "Deep Focus":
-                cv2.rectangle(frame, (25, 130), (200, 160), (255, 191, 0), -1)
-                cv2.putText(frame, "STIFF / FOCUS", (40, 152), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                # 4. Плашка статуса (появляется только при аномалиях)
+                if focus_status == "Deep Focus":
+                    cv2.rectangle(small_frame, (25, 130), (200, 160), (255, 191, 0), -1)
+                    cv2.putText(small_frame, "STIFF / FOCUS", (40, 152), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        cv2.imshow("Interview Analyzer", frame)
+        cv2.imshow("Interview Analyzer", small_frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
