@@ -1,0 +1,57 @@
+{
+    "video": "3.mp4",
+    "processing_time": "886.66 сек",
+    "gaze": {
+        "look_confidence_percent": 69.8,
+        "anxiety_episodes": [
+            {
+                "start": "1:50",
+                "end": "2:15"
+            },
+            {
+                "start": "3:30",
+                "end": "4:10"
+            },
+            {
+                "start": "17:05",
+                "end": "17:20"
+            }
+        ],
+        "focus_episodes": [
+            {
+                "start": "11:23",
+                "end": "11:34",
+                "duration_sec": 11
+            },
+            {
+                "start": "11:54",
+                "end": "12:04",
+                "duration_sec": 10
+            },
+            {
+                "start": "12:28",
+                "end": "12:39",
+                "duration_sec": 11
+            },
+            {
+                "start": "22:08",
+                "end": "22:19",
+                "duration_sec": 11
+            }
+        ]
+    },
+    "gestures": {
+        "gesture_status": "confident",
+        "percentages": {
+            "natural": 71,
+            "stiff": 22,
+            "excessive": 6
+        }
+    },
+    "anxiety": {
+        "status": "calm"
+    },
+    "pose": {
+        "status": "no_data"
+    }
+}

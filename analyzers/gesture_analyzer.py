@@ -79,15 +79,25 @@ class GestureAnalyzer:
 
     def get_report(self):
         if self.total_frames == 0:
-            return "Жесты: нет данных"
+            return {"status": "no_data"}
+            
         stiff, natural, excessive = self.get_percentages()
+        
+        # Определяем доминирующий статус для удобства
         if natural > 60:
-            return f"Жесты уверенные: {int(natural)}%"
+            status = "confident"
         elif stiff > 50:
-            return f"Жесты пассивные: {int(stiff)}%"
+            status = "passive"
         elif excessive > 40:
-            return f"Жесты чрезмерные: {int(excessive)}%"
-        return (f"Жесты смешанные:\n"
-                f"  Уверенные: {int(natural)}%\n"
-                f"  Пассивные: {int(stiff)}%\n"
-                f"  Чрезмерные: {int(excessive)}%")
+            status = "excessive"
+        else:
+            status = "mixed"
+            
+        return {
+            "gesture_status": status,
+            "percentages": {
+                "natural": int(natural),
+                "stiff": int(stiff),
+                "excessive": int(excessive)
+            }
+        }

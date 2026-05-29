@@ -1,0 +1,168 @@
+{
+    "video": "2.mp4",
+    "processing_time": "1183.63 сек",
+    "gaze": {
+        "look_confidence_percent": 90.1,
+        "anxiety_episodes": [
+            {
+                "start": "1:15",
+                "end": "1:30"
+            },
+            {
+                "start": "5:55",
+                "end": "6:10"
+            },
+            {
+                "start": "8:25",
+                "end": "8:50"
+            },
+            {
+                "start": "10:15",
+                "end": "10:30"
+            },
+            {
+                "start": "10:45",
+                "end": "11:05"
+            },
+            {
+                "start": "11:25",
+                "end": "11:50"
+            },
+            {
+                "start": "14:05",
+                "end": "14:25"
+            },
+            {
+                "start": "15:50",
+                "end": "16:15"
+            },
+            {
+                "start": "18:00",
+                "end": "18:20"
+            },
+            {
+                "start": "21:20",
+                "end": "21:35"
+            },
+            {
+                "start": "23:30",
+                "end": "23:55"
+            },
+            {
+                "start": "24:55",
+                "end": "25:50"
+            },
+            {
+                "start": "26:25",
+                "end": "26:50"
+            }
+        ],
+        "focus_episodes": [
+            {
+                "start": "7:56",
+                "end": "8:06",
+                "duration_sec": 10
+            },
+            {
+                "start": "9:58",
+                "end": "10:09",
+                "duration_sec": 10
+            },
+            {
+                "start": "17:00",
+                "end": "17:13",
+                "duration_sec": 12
+            },
+            {
+                "start": "18:30",
+                "end": "18:40",
+                "duration_sec": 10
+            },
+            {
+                "start": "20:36",
+                "end": "21:02",
+                "duration_sec": 25
+            },
+            {
+                "start": "22:30",
+                "end": "22:41",
+                "duration_sec": 11
+            },
+            {
+                "start": "22:53",
+                "end": "23:04",
+                "duration_sec": 11
+            },
+            {
+                "start": "24:43",
+                "end": "24:55",
+                "duration_sec": 11
+            },
+            {
+                "start": "26:12",
+                "end": "26:25",
+                "duration_sec": 12
+            },
+            {
+                "start": "26:54",
+                "end": "27:07",
+                "duration_sec": 12
+            },
+            {
+                "start": "27:50",
+                "end": "28:02",
+                "duration_sec": 11
+            },
+            {
+                "start": "29:00",
+                "end": "29:12",
+                "duration_sec": 11
+            }
+        ]
+    },
+    "gestures": {
+        "gesture_status": "mixed",
+        "percentages": {
+            "natural": 47,
+            "stiff": 43,
+            "excessive": 8
+        }
+    },
+    "anxiety": {
+        "status": "mild anxiety"
+    },
+    "pose": {
+        "pose_episodes": [
+            {
+                "pose": "closed",
+                "start": "2:38",
+                "end": "2:48",
+                "duration_sec": 10
+            },
+            {
+                "pose": "closed",
+                "start": "3:54",
+                "end": "4:00",
+                "duration_sec": 6.2
+            },
+            {
+                "pose": "closed",
+                "start": "8:33",
+                "end": "8:53",
+                "duration_sec": 20
+            },
+            {
+                "pose": "closed",
+                "start": "17:02",
+                "end": "17:15",
+                "duration_sec": 13
+            },
+            {
+                "pose": "closed",
+                "start": "18:54",
+                "end": "19:04",
+                "duration_sec": 10.6
+            }
+        ]
+    }
+}

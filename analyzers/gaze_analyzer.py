@@ -3,32 +3,26 @@ import numpy as np
 class GazeAnalyzer:
     def __init__(self):
         self.look_count = 0
-        self.total_frames = 0 # Будем просто считать кадры для статистики
-
+        self.total_frames = 0
         self.total_blinks = 0
-        self.blink_count_at_start = 0
-        self.blink_timestamps = []
-        self.closed_frames = 0
-        self.open_frames = 0
-        self.MIN_OPEN_FRAMES = 2
-        self.last_blink_time = 0
-        self.peak_bpm = 0
-
-        self.anomalies = []
-        self.stiff_episodes = []
-
-        self.current_anomaly_start = None
-        self.is_stiff_recorded = False
-        self.last_bpm_val = 0
+        self.last_blink_time = 0.0
+        self.total_v_duration = 0.0
+        
+        self.blink_map = {}          # {секунда: количество_морганий}
+        self.stiff_episodes = []     # Эпизоды замирания
 
         self.ear_history = []
         self.EAR_THRESHOLD = None
-        # Калибровка по времени, а не по кадрам
-        self.CALIBRATION_TIME = 3.0 
+        self.CALIBRATION_TIME = 3.0   # Калибровка 3 секунды
+        self.STIFF_THRESHOLD = 10.0   # Порог замирания (10 секунд без морганий)
+        
+        # Добавляем переменные счетчиков фреймов (они необходимы для работы детектора)
+        self.closed_frames = 0
+        self.open_frames = 0
+        self.MIN_OPEN_FRAMES = 2
 
-        self.BPM_THRESHOLD = 30
-        self.STIFF_THRESHOLD = 10.0
-
+        self.prev_ear = None
+        self.EAR_DROP_THRESHOLD = 0.06  # порог резкости падения
     def _get_point(self, lm, idx):
         return np.array([lm[idx].x, lm[idx].y])
 
@@ -43,106 +37,105 @@ class GazeAnalyzer:
         r_ear = eye_aspect_ratio(self._get_point(lm, 362), self._get_point(lm, 385), self._get_point(lm, 387), self._get_point(lm, 263), self._get_point(lm, 373), self._get_point(lm, 380))
         return (l_ear + r_ear) / 2.0
 
+    def format_time(self, seconds):
+        return f"{int(seconds // 60)}:{int(seconds % 60):02d}"
+
     def update(self, lm, current_v_time, STEP):
-        self.total_frames += STEP # Для итогового отчета
+        self.total_v_duration = current_v_time
+        self.total_frames += STEP
         
         # 1. Анализ взгляда
         head_ok = abs((self._get_point(lm, 1) - (self._get_point(lm, 33) + self._get_point(lm, 263)) / 2)[0]) < 0.05
         l_ratio = (lm[468].x - lm[33].x) / (lm[133].x - lm[33].x)
         r_ratio = (lm[473].x - lm[362].x) / (lm[263].x - lm[362].x)
         looking = head_ok and (0.4 < l_ratio < 0.6 and 0.4 < r_ratio < 0.6)
+
         if looking:
             self.look_count += STEP
 
-        # 2. Калибровка (используем время)
+        # 2. Калибровка
         ear = self.calculate_ear(lm)
         if self.EAR_THRESHOLD is None:
             self.ear_history.append(ear)
             if current_v_time >= self.CALIBRATION_TIME:
                 baseline = np.mean(self.ear_history)
-                self.EAR_THRESHOLD = baseline * 0.75
-                print(f"[Calibration] baseline: {baseline:.3f} -> threshold: {self.EAR_THRESHOLD:.3f}")
-            return looking, 0, "Calibrating...", 0
-
-        # 3. Детектор моргания
-        if ear < self.EAR_THRESHOLD:
-            self.closed_frames += 1
-            self.open_frames = 0
-            if self.closed_frames == 1:
-                self.total_blinks += 1
-                if self.is_stiff_recorded:
-                    self.stiff_episodes.append((self.last_blink_time, current_v_time))
-                    self.is_stiff_recorded = False
-                self.blink_timestamps.append(current_v_time)
-                self.last_blink_time = current_v_time
-        else:
-            self.open_frames += 1
-            if self.open_frames >= self.MIN_OPEN_FRAMES:
-                self.closed_frames = 0
-
-        # 4. Расчёт BPM
-        self.blink_timestamps = [t for t in self.blink_timestamps if current_v_time - t < 60]
-        calc_t = min(current_v_time, 60)
-        bpm = 0 if current_v_time < 10 else (len(self.blink_timestamps) / calc_t) * 60
-
-        # 5. Логика высокого BPM
-        if bpm > self.BPM_THRESHOLD:
-            if self.current_anomaly_start is None:
-                self.current_anomaly_start = current_v_time
-                self.blink_count_at_start = self.total_blinks
-                self.peak_bpm = bpm
-            else:
-                self.peak_bpm = max(self.peak_bpm, bpm)
-        else: # BPM упал ниже порога
-            if self.current_anomaly_start is not None:
-                duration = current_v_time - self.current_anomaly_start
-                if duration > 2.0:
-                    blinks_in_episode = self.total_blinks - self.blink_count_at_start
-                    
-                    # Сохраняем пиковое значение, которое мы отслеживали всё это время
-                    self.anomalies.append((
-                        self.current_anomaly_start, 
-                        current_v_time, 
-                        self.peak_bpm,  # <--- Вот он, наш пик
-                        blinks_in_episode
-                    ))
-                self.current_anomaly_start = None
-                self.peak_bpm = 0 # Сбрасываем пик для следующего раза
-
-        # 6. Логика замирания
-        time_since_last_blink = current_v_time - self.last_blink_time
-        focus_status = "Normal"
-        if self.closed_frames == 0 and time_since_last_blink > self.STIFF_THRESHOLD:
-            self.is_stiff_recorded = True
-            focus_status = "Deep Focus"
-
-        self.last_bpm_val = bpm
-        return looking, bpm, focus_status, time_since_last_blink
-
-    def format_time(self, seconds):
-        return f"{int(seconds // 60)}:{int(seconds % 60):02d}"
-
-    def get_report(self, current_time):
-        if self.total_frames == 0: return "Взгляд: нет данных"
-
-        if self.current_anomaly_start is not None:
-            blinks_in_episode = self.total_blinks - self.blink_count_at_start
-            self.anomalies.append((self.current_anomaly_start, current_time, self.peak_bpm, blinks_in_episode))
+                self.EAR_THRESHOLD = baseline * 0.83
+            return
         
-        if self.is_stiff_recorded:
-            self.stiff_episodes.append((self.last_blink_time, current_time))
+        # Проверяем, лежат ли зрачки внутри горизонтальных границ глазных уголков
+        left_iris_visible = lm[33].x < lm[468].x < lm[133].x
+        right_iris_visible = lm[362].x < lm[473].x < lm[263].x
+        
+        # Нам достаточно, чтобы был виден хотя бы один зрачок (если голова повернута вбок)
+        iris_visible = left_iris_visible or right_iris_visible
+
+        # Если зрачков не видно, мы просто полностью ИГНОРИРУЕМ этот кадр для детектора морганий.
+        if iris_visible:
+            # Считаем дельту, только если есть предыдущий кадр
+            drop = self.prev_ear - ear if self.prev_ear is not None else 0.0
+            
+            # Условие закрытия: ИЛИ EAR упал ниже порога калибровки, ИЛИ произошел резкий дроп
+            is_closing = (ear < self.EAR_THRESHOLD) or (drop > self.EAR_DROP_THRESHOLD)
+            
+            if is_closing:
+                self.closed_frames += 1
+                self.open_frames = 0
+                
+                if self.closed_frames == 1:  # Фиксируем моргание ТОЛЬКО в первый кадр закрытия
+                    if self.last_blink_time == 0.0:
+                        self.last_blink_time = current_v_time
+
+                    time_since_last = current_v_time - self.last_blink_time
+                    if time_since_last > self.STIFF_THRESHOLD:
+                        self.stiff_episodes.append({
+                            "start": self.format_time(self.last_blink_time),
+                            "end": self.format_time(current_v_time),
+                            "duration_sec": int(time_since_last)
+                        })
+
+                    self.total_blinks += 1
+                    self.last_blink_time = current_v_time
+                    
+                    sec = int(current_v_time)
+                    self.blink_map[sec] = self.blink_map.get(sec, 0) + 1
+            else:
+                # Глаз открыт
+                self.open_frames += 1
+                if self.open_frames >= self.MIN_OPEN_FRAMES:
+                    self.closed_frames = 0
+            
+            self.prev_ear = ear  # Запоминаем EAR текущего кадра для следующего шага
+
+    def get_report(self):
+        if self.total_frames == 0 or self.total_v_duration == 0:
+            return {"status": "no_data"}
+
+        self.last_blink_time = self.total_v_duration
 
         pct = (self.look_count / self.total_frames) * 100
-        report = [f"Взгляд: {'Уверенный' if pct > 60 else 'Неуверенный'} ({pct:.1f}% времени)"]
+        global_avg_bpm = (self.total_blinks / self.total_v_duration) * 60
 
-        if self.anomalies:
-            report.append("\nУчастки тревожности (высокий BPM):")
-            for s, e, peak_b, count in self.anomalies:
-                report.append(f"  - [{self.format_time(s)}-{self.format_time(e)}] Морганий: {count} (Пиковый BPM: {int(peak_b)})")
+        anomalies = []
+        window_size = 15
 
-        if self.stiff_episodes:
-            report.append("\nУчастки глубокой фокусировки (замирания):")
-            for s, e in self.stiff_episodes:
-                report.append(f"  - [{self.format_time(s)}-{self.format_time(e)}] Длительность: {int(e - s)} сек.")
+        for start_t in range(0, int(self.total_v_duration) - window_size, 5):
+            end_t = start_t + window_size
+            blinks_in_window = sum(count for t, count in self.blink_map.items() if start_t <= t < end_t)
+            window_bpm = (blinks_in_window / window_size) * 60
 
-        return "\n".join(report)
+            if window_bpm > (global_avg_bpm * 1.5) and window_bpm > 25:
+                if anomalies and anomalies[-1]['end_sec'] >= start_t:
+                    anomalies[-1]['end_sec'] = end_t
+                else:
+                    anomalies.append({"start_sec": start_t, "end_sec": end_t})
+                    
+        return {
+            "look_confidence_percent": round(pct, 1),
+            "anxiety_episodes": [
+                {
+                    "start": self.format_time(a['start_sec']),
+                    "end": self.format_time(a['end_sec']),
+                } for a in anomalies
+            ],
+            "focus_episodes": self.stiff_episodes
+        }

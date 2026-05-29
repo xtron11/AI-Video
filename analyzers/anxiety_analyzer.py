@@ -43,8 +43,15 @@ class AnxietyAnalyzer:
         return self.score, len(self.touch_history)
 
     def get_report(self):
+        # Определяем текстовый статус
         if self.score <= 1:
-            return "Лицо: Спокойное"
+            status = "calm"
         elif self.score <= 3:
-            return "Лицо: Лёгкая тревога"
-        return "Лицо: Встревоженное"
+            status = "mild anxiety"
+        else:
+            status = "high anxiety"
+
+        # Возвращаем расширенный словарь
+        return {
+            "status": status,
+        }

@@ -1,141 +1,143 @@
+import time
+import json
+import os
+from multiprocessing import Pool, cpu_count
+
 import cv2
 import mediapipe as mp
 import numpy as np
-from config import VIDEO_PATH, STEP
+
+from config import STEP
 from analyzers.gaze_analyzer import GazeAnalyzer
 from analyzers.pose_analyzer import PoseAnalyzer
 from analyzers.gesture_analyzer import GestureAnalyzer
 from analyzers.anxiety_analyzer import AnxietyAnalyzer
-from report import print_report
 
-mp_holistic  = mp.solutions.holistic
+def process_video_task(video_path):
+    print(f" >>> Воркер начал работу над: {video_path}")
 
-gaze    = GazeAnalyzer()
-pose    = PoseAnalyzer()
-gesture = GestureAnalyzer()
-anxiety = AnxietyAnalyzer()
-
-cap = cv2.VideoCapture(VIDEO_PATH)
-
-with mp_holistic.Holistic(min_detection_confidence=0.5,
-                          min_tracking_confidence=0.5,
-                          refine_face_landmarks=True) as holistic:
+    start_video_time = time.time() # Засекаем время внутри функции
     
-    # Определяем целевую высоту
-    target_height = 480
-
-    frame_idx = 0
-    current_time = 0.0
+    cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
 
-    while cap.isOpened():
-        ok, frame = cap.read()
-        if not ok:
-            break
-        
-        # Считаем кадры вместо того чтобы брать реальное время
-        frame_idx += 1
-        current_time = frame_idx / fps
+    gaze    = GazeAnalyzer()
+    pose    = PoseAnalyzer()
+    gesture = GestureAnalyzer()
+    anxiety = AnxietyAnalyzer()
 
-        # 1. Сначала делаем Resize (уменьшаем нагрузку на память сразу)
-        h, w = frame.shape[:2]
-        ratio = target_height / h
-        small_frame = cv2.resize(frame, (int(w * ratio), target_height))
+    mp_holistic = mp.solutions.holistic
+    target_height = 480
+    current_time = 0.0
 
-        # 2. Теперь берём h, w уже от маленького кадра
-        h, w = small_frame.shape[:2]
+    with mp_holistic.Holistic(min_detection_confidence=0.5,
+                              min_tracking_confidence=0.5,
+                              refine_face_landmarks=True) as holistic:
+        frame_idx = 0
+        while cap.isOpened():
+            ok, frame = cap.read()
+            if not ok:
+                break
 
-        if frame_idx % STEP == 0:
+            frame_idx += 1
+            if frame_idx % STEP != 0:
+                continue
+
+            current_time = frame_idx / fps
+
+            h, w = frame.shape[:2]
+            ratio = target_height / h
+            small_frame = cv2.resize(frame, (int(w * ratio), target_height))
+            h, w = small_frame.shape[:2]
+
             rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-            pose_results = holistic.process(rgb)
+            results = holistic.process(rgb)
 
-            if pose_results.pose_landmarks:
-                lm = pose_results.pose_landmarks.landmark
+            if results.pose_landmarks:
+                lm = results.pose_landmarks.landmark
                 l_sh = np.array([lm[11].x * w, lm[11].y * h])
                 r_sh = np.array([lm[12].x * w, lm[12].y * h])
-                sw   = np.linalg.norm(l_sh - r_sh) or 1
+                sw = np.linalg.norm(l_sh - r_sh) or 1
 
                 pose.update(lm, sw, current_time)
-                
-                # Жестикуляция
-                # Вместо пикселей — нормализованные координаты
-                if pose_results.left_hand_landmarks:
-                    l_finger = pose_results.left_hand_landmarks.landmark[20]
-                    l_rel = (l_finger.x - lm[11].x,   # относительно плеча в координатах 0-1
-                            l_finger.y - lm[11].y)
-                else:
-                    l_rel = None
 
-                if pose_results.right_hand_landmarks:
-                    r_finger = pose_results.right_hand_landmarks.landmark[20]
-                    r_rel = (r_finger.x - lm[12].x,
-                            r_finger.y - lm[12].y)
-                else:
-                    r_rel = None
+                l_rel = None
+                r_rel = None
 
-                amp = gesture.update(current_time, l_rel, r_rel, STEP)
+                if results.left_hand_landmarks:
+                    l_finger = results.left_hand_landmarks.landmark[20]
+                    l_rel = (l_finger.x - lm[11].x, l_finger.y - lm[11].y)
 
-                # ── Тревога (касания лица) ──
+                if results.right_hand_landmarks:
+                    r_finger = results.right_hand_landmarks.landmark[20]
+                    r_rel = (r_finger.x - lm[12].x, r_finger.y - lm[12].y)
+
+                gesture.update(current_time, l_rel, r_rel)
+
                 nose = np.array([lm[0].x * w, lm[0].y * h])
-                dist_l = np.linalg.norm(nose - np.array([l_finger.x * w, l_finger.y * h])) \
-                        if pose_results.left_hand_landmarks else 9999
-                dist_r = np.linalg.norm(nose - np.array([r_finger.x * w, r_finger.y * h])) \
-                        if pose_results.right_hand_landmarks else 9999
+                dist_l = np.linalg.norm(nose - np.array([results.left_hand_landmarks.landmark[20].x * w,
+                                                          results.left_hand_landmarks.landmark[20].y * h])) \
+                         if results.left_hand_landmarks else 9999
+                dist_r = np.linalg.norm(nose - np.array([results.right_hand_landmarks.landmark[20].x * w,
+                                                          results.right_hand_landmarks.landmark[20].y * h])) \
+                         if results.right_hand_landmarks else 9999
                 anxiety.update(dist_l, dist_r, sw, current_time)
+
+            if results.face_landmarks:
+                gaze.update(results.face_landmarks.landmark, current_time, STEP)
+
+    cap.release()
+
+    result_data = {
+        "video": os.path.basename(video_path),
+        "processing_time": f"{time.time() - start_video_time:.2f} сек",
+        "gaze": gaze.get_report(),
+        "gestures": gesture.get_report(),
+        "anxiety": anxiety.get_report(),
+        "pose": pose.get_report(),
+    }
+    return result_data
+
+if __name__ == "__main__":
+    video_folder = "./uploads"
+    output_folder = "./reports"  # Папка для результатов
+    
+    # Создаем папку для отчетов, если её еще нет
+    os.makedirs(output_folder, exist_ok=True)
+
+    videos = [os.path.join(video_folder, f) for f in os.listdir(video_folder) if f.endswith(".mp4")]
+    total_videos = len(videos)
+    
+    if total_videos == 0:
+        print("В папке uploads нет видео!")
+        exit()
+
+    num_workers = min(3, max(1, cpu_count() // 2))
+    print(f"--- ЗАПУСК СИСТЕМЫ ---")
+    print(f"Найдено видео: {total_videos}")
+    print(f"Используем ядер: {num_workers}")
+    print("-" * 30)
+    
+    start_time = time.time()
+
+    # Запускаем пул воркеров
+    with Pool(processes=num_workers) as pool:
+        for i, result in enumerate(pool.imap_unordered(process_video_task, videos), 1):
+            video_name = result.get("video", "Unknown")
+            print(f"[{i}/{total_videos}] Завершена обработка: {video_name}")
+            
+            # Убираем расширение .mp4 из имени файла и добавляем .json
+            base_name = os.path.splitext(video_name)[0]  # Например: "interview_candidate_1"
+            json_filename = f"{base_name}_report.json"    # "interview_candidate_1_report.json"
+            json_path = os.path.join(output_folder, json_filename)
+            
+            # Сохраняем индивидуальный JSON сразу по окончании обработки видео
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=4)
                 
-                total_crossed_time = pose.get_total_crossed(current_time)
-                is_hands_crossed = pose.is_crossed
+            print(f" -> Отчет успешно сохранен в: {json_path}")
 
-                # Выбираем цвет: красный если руки сейчас скрещены, белый если нет
-                crossed_color = (0, 0, 255) if is_hands_crossed else (255, 255, 255)
-
-                # Отрисовка на экране (снизу слева или под BPM)
-                cv2.putText(small_frame, f"Hands Crossed: {int(total_crossed_time)}s", (30, 140), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, crossed_color, 2)
-
-                # Если руки скрещены прямо сейчас, выведем уведомление
-                if is_hands_crossed:
-                    cv2.putText(small_frame, "CLOSED POSE", (30, 170), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
-            # ── FaceMesh (взгляд) ──
-            if pose_results.face_landmarks:
-                # Получаем данные из анализатора
-                looking, current_bpm, focus_status, stiff_time = gaze.update(pose_results.face_landmarks.landmark, current_time, STEP)
-
-                # Цвета для индикации
-                # Фокус — синий, Тревога — красный, Норма — зеленый
-                color = (0, 255, 0)
-                if focus_status == "Deep Focus":
-                    color = (255, 191, 0) # Голубой
-                elif current_bpm > gaze.BPM_THRESHOLD:
-                    color = (0, 0, 255) # Красный
-
-                # --- Отрисовка на экране ---
-                
-                # 1. Основной статус (Looking / Not Looking)
-                look_text = "LOOKING" if looking else "NOT LOOKING"
-                cv2.putText(small_frame, look_text, (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-
-                # 2. Текущий BPM
-                cv2.putText(small_frame, f"BPM: {int(current_bpm)}", (30, 80), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-                # 3. Таймер без морганий (чтобы ты видел, как тикают те самые 10 секунд)
-                stiff_color = (255, 255, 0) if stiff_time > gaze.STIFF_THRESHOLD else (0, 200, 200)
-                cv2.putText(small_frame, f"No Blink: {stiff_time:.1f}s", (30, 110), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, stiff_color, 2)
-
-                # 4. Плашка статуса (появляется только при аномалиях)
-                if focus_status == "Deep Focus":
-                    cv2.rectangle(small_frame, (25, 130), (200, 160), (255, 191, 0), -1)
-                    cv2.putText(small_frame, "STIFF / FOCUS", (40, 152), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-        cv2.imshow("Interview Analyzer", small_frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-cap.release()
-cv2.destroyAllWindows()
-print_report(gaze, gesture, anxiety, pose, current_time)
+    end_time = time.time()
+    print("-" * 30)
+    print(f"ВСЕГО ОБРАБОТАНО: {total_videos}")
+    print(f"ОБЩЕЕ ВРЕМЯ: {end_time - start_time:.2f} сек")

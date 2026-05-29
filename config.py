@@ -1,5 +1,3 @@
-VIDEO_PATH = "Video/video3.mp4"
-
 # Пороги для анализаторов
 CROSS_THRESHOLD_RATIO = 0.6      # доля ширины плеч для детектора скрещивания
 FACE_TOUCH_THRESHOLD_RATIO = 0.35
